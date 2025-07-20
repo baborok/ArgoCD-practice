@@ -1,7 +1,7 @@
 replicaCount: 1
 
 image:
-  repository: my/craftista-recco
+  repository: nitheesh86/microservice-recommendation
   tag: latest
   pullPolicy: Always
 
