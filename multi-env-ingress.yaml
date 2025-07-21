@@ -1,0 +1,39 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: multi-env-ingress
+  namespace: default
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  ingressClassName: nginx
+  rules:
+  - http:
+      paths:
+      # Development environment
+      - path: /dev/frontend(/|$)(.*)
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: frontend-dev.frontend-dev.svc.cluster.local
+            port:
+              number: 80
+      
+      # Production environment  
+      - path: /prod/frontend(/|$)(.*)
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: frontend-prod.frontend-prod.svc.cluster.local
+            port:
+              number: 80
+              
+      # Staging environment
+      - path: /staging/frontend(/|$)(.*)
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: frontend-staging.frontend-staging.svc.cluster.local
+            port:
+              number: 80
