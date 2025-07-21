@@ -1,5 +1,5 @@
-# Lightweight monitoring configuration for resource-constrained cluster
-# Optimized for clusters with limited RAM (~4GB total)
+# Production-ready monitoring configuration with persistence
+# Uses local PersistentVolumes for data storage
 
 ingress:
   enabled: true
@@ -11,28 +11,39 @@ ingress:
     path: /alertmanager
 
 kube-prometheus-stack:
-  # Grafana - lightweight configuration
+  # Grafana - with persistence
   grafana:
     adminPassword: "monitoring-admin123"
     
-    # Minimal resource allocation
     resources:
       limits:
-        cpu: 200m
-        memory: 256Mi
+        cpu: 300m
+        memory: 512Mi
       requests:
         cpu: 100m
-        memory: 128Mi
+        memory: 256Mi
     
-    # Minimal persistence
+    # ENABLE persistence with proper StorageClass
     persistence:
       enabled: true
-      size: 1Gi
+      size: 2Gi
+      storageClassName: local-storage
+      accessModes:
+        - ReadWriteOnce
     
-    # Disable plugins to save memory
-    plugins: []
-    
-    # Minimal configuration
+    # Enable sidecar for dashboards
+    sidecar:
+      dashboards:
+        enabled: true
+        label: grafana_dashboard
+      datasources:
+        enabled: true
+        
+    # Useful plugins for monitoring
+    plugins:
+      - grafana-piechart-panel
+      - grafana-worldmap-panel
+        
     grafana.ini:
       server:
         root_url: http://192.168.1.100/grafana
@@ -40,59 +51,56 @@ kube-prometheus-stack:
         check_for_updates: false
         reporting_enabled: false
       log:
-        level: warn  # Reduce logging
-      snapshots:
-        external_enabled: false
+        level: info
+      paths:
+        data: /var/lib/grafana/data
+        logs: /var/log/grafana
+        plugins: /var/lib/grafana/plugins
+        provisioning: /etc/grafana/provisioning
 
-  # Prometheus - lightweight configuration  
+  # Prometheus - with persistence
   prometheus:
     enabled: true
     
     prometheusSpec:
-      # Minimal resource allocation
       resources:
         limits:
+          cpu: 1000m
+          memory: 2Gi
+        requests:
           cpu: 500m
           memory: 1Gi
-        requests:
-          cpu: 200m
-          memory: 512Mi
       
-      # Reduced retention to save storage and memory
-      retention: 3d  # Instead of 15d
-      retentionSize: 2GB  # Instead of 30GB
+      # Proper retention with persistence
+      retention: 15d
+      retentionSize: 8GB
       
-      # Minimal storage
+      # ENABLE storage with proper StorageClass
       storageSpec:
         volumeClaimTemplate:
           spec:
+            storageClassName: local-storage
             accessModes: ["ReadWriteOnce"]
             resources:
               requests:
-                storage: 5Gi  # Instead of 15Gi
+                storage: 10Gi
       
-      # Reduce scrape frequency to save CPU/memory
-      scrapeInterval: 60s  # Instead of 30s
-      evaluationInterval: 60s
+      scrapeInterval: 30s
+      evaluationInterval: 30s
       
-      # Disable some heavy features
-      enableAdminAPI: false
-      portName: web
-      
-      # Monitor only essential namespaces
       serviceMonitorSelectorNilUsesHelmValues: false
       podMonitorSelectorNilUsesHelmValues: false
       ruleSelectorNilUsesHelmValues: false
       
-      # Lightweight scrape config - only essential metrics
+      # Comprehensive scraping configuration
       additionalScrapeConfigs:
-        # Only dev namespace for now (expand later if needed)
-        - job_name: 'microservices-dev-lightweight'
-          scrape_interval: 60s  # Less frequent scraping
+        # Microservices in all environments
+        - job_name: 'microservices-dev'
+          scrape_interval: 30s
           kubernetes_sd_configs:
             - role: pod
               namespaces:
-                names: ['dev']  # Only dev namespace
+                names: ['dev']
           relabel_configs:
             - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
               action: keep
@@ -108,58 +116,122 @@ kube-prometheus-stack:
               target_label: __address__
             - source_labels: [__meta_kubernetes_namespace]
               target_label: environment
-              replacement: dev
+            - source_labels: [__meta_kubernetes_pod_name]
+              target_label: pod
+            - source_labels: [__meta_kubernetes_pod_container_name]
+              target_label: container
 
-  # AlertManager - minimal configuration
+        # ArgoCD metrics
+        - job_name: 'argocd'
+          scrape_interval: 30s
+          kubernetes_sd_configs:
+            - role: service
+              namespaces:
+                names: ['argocd']
+          relabel_configs:
+            - source_labels: [__meta_kubernetes_service_label_app_kubernetes_io_name]
+              action: keep
+              regex: argocd-metrics
+
+      # Custom alerting rules
+      additionalPrometheusRulesMap:
+        microservices.rules:
+          groups:
+          - name: microservices
+            rules:
+            - alert: MicroserviceDown
+              expr: up{job="microservices-dev"} == 0
+              for: 2m
+              labels:
+                severity: critical
+              annotations:
+                summary: "Microservice {{ $labels.container }} is down"
+                description: "{{ $labels.container }} in {{ $labels.environment }} has been down for more than 2 minutes."
+                
+            - alert: HighMemoryUsage
+              expr: (container_memory_usage_bytes{namespace="dev"} / container_spec_memory_limit_bytes) > 0.8
+              for: 5m
+              labels:
+                severity: warning
+              annotations:
+                summary: "High memory usage in {{ $labels.container }}"
+                description: "{{ $labels.container }} is using {{ $value | humanizePercentage }} of available memory."
+                
+            - alert: HighCPUUsage
+              expr: rate(container_cpu_usage_seconds_total{namespace="dev"}[5m]) > 0.8
+              for: 5m
+              labels:
+                severity: warning
+              annotations:
+                summary: "High CPU usage in {{ $labels.container }}"
+
+  # AlertManager - with persistence
   alertmanager:
     enabled: true
     
     alertmanagerSpec:
-      # Minimal resources
       resources:
         limits:
+          cpu: 200m
+          memory: 256Mi
+        requests:
           cpu: 100m
           memory: 128Mi
-        requests:
-          cpu: 50m
-          memory: 64Mi
           
-      # Minimal storage
+      # ENABLE storage with proper StorageClass
       storage:
         volumeClaimTemplate:
           spec:
+            storageClassName: local-storage
             accessModes: ["ReadWriteOnce"]
             resources:
               requests:
-                storage: 500Mi  # Very small
+                storage: 1Gi
       
-      # Minimal retention
-      retention: 24h  # Instead of default 120h
+      retention: 168h  # 1 week
+      
+      # AlertManager configuration
+      config:
+        global:
+          smtp_smarthost: 'localhost:587'
+          smtp_from: 'alertmanager@cluster.local'
+          
+        route:
+          group_by: ['alertname', 'environment']
+          group_wait: 10s
+          group_interval: 10s
+          repeat_interval: 1h
+          receiver: 'web.hook'
+          
+        receivers:
+        - name: 'web.hook'
+          webhook_configs:
+          - url: 'http://127.0.0.1:5001/'
 
-  # Node Exporter - lightweight
+  # Prometheus Operator
+  prometheusOperator:
+    resources:
+      limits:
+        cpu: 300m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 256Mi
+
+  # Node Exporter - полные метрики узлов
   nodeExporter:
     enabled: true
     resources:
       limits:
-        cpu: 100m
-        memory: 64Mi
-      requests:
-        cpu: 50m
-        memory: 32Mi
-
-  # kube-state-metrics - lightweight
-  kubeStateMetrics:
-    enabled: true
-    resources:
-      limits:
-        cpu: 100m
+        cpu: 200m
         memory: 128Mi
       requests:
-        cpu: 50m
+        cpu: 100m
         memory: 64Mi
 
-  # Disable heavy components to save resources
-  prometheusOperator:
+  # kube-state-metrics - полные метрики кластера
+  kubeStateMetrics:
+    enabled: true
     resources:
       limits:
         cpu: 200m
@@ -168,27 +240,22 @@ kube-prometheus-stack:
         cpu: 100m
         memory: 128Mi
 
-  # Reduce default rules to essential only
+  # Comprehensive alerting rules
   defaultRules:
     create: true
     rules:
-      alertmanager: false  # Disable to save memory
-      etcd: false  # Not needed for our setup
-      general: true  # Keep basic rules
-      k8s: true  # Keep k8s rules
-      kubePrometheusNodeRecording: true  # Keep node rules
-      kubernetesApps: true  # Keep app rules
-      kubernetesResources: true  # Keep resource rules
-      kubernetesStorage: false  # Disable if not using persistent volumes extensively
-      kubernetesSystem: true  # Keep system rules
-      node: true  # Keep node rules
-      prometheus: false  # Disable prometheus self-monitoring rules
+      alertmanager: true
+      etcd: false  # У нас не etcd кластер
+      general: true
+      k8s: true
+      kubePrometheusNodeRecording: true
+      kubernetesApps: true
+      kubernetesResources: true
+      kubernetesStorage: true
+      kubernetesSystem: true
+      node: true
+      prometheus: true
 
-# Global resource configuration
-global:
-  # Image pull policy to save bandwidth
-  imagePullPolicy: IfNotPresent
-
-# ServiceMonitor configuration - minimal
+# ServiceMonitor для автоматического обнаружения метрик
 serviceMonitor:
-  enabled: false  # Disable for now to save resources
+  enabled: true
