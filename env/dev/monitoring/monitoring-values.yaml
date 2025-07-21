@@ -1,37 +1,40 @@
-# Production-ready persistent monitoring configuration
+# ULTRA LIGHTWEIGHT monitoring for resource-constrained cluster
+# Designed for clusters with ~1GB RAM per node
 
 ingress:
   enabled: true
   grafana:
     path: /grafana
   prometheus:
-    path: /prometheus  
-  alertmanager:
-    path: /alertmanager
+    path: /prometheus
 
 kube-prometheus-stack:
-  # Grafana with persistence
+  # Grafana - minimal resources
   grafana:
-    adminPassword: "monitoring-admin123"
+    adminPassword: "admin123"
     
+    # MINIMAL resources
     resources:
       limits:
-        cpu: 300m
-        memory: 512Mi
-      requests:
         cpu: 100m
-        memory: 256Mi
+        memory: 128Mi
+      requests:
+        cpu: 50m
+        memory: 64Mi
     
     persistence:
       enabled: true
-      size: 2Gi
+      size: 1Gi  # Reduced from 2Gi
       storageClassName: local-storage
     
+    # Disable heavy features
     sidecar:
       dashboards:
-        enabled: true
+        enabled: false  # Saves memory
       datasources:
         enabled: true
+        
+    plugins: []  # No plugins to save memory
         
     grafana.ini:
       server:
@@ -39,21 +42,23 @@ kube-prometheus-stack:
       analytics:
         check_for_updates: false
 
-  # Prometheus with persistence
+  # Prometheus - ULTRA minimal resources
   prometheus:
     enabled: true
     
     prometheusSpec:
+      # CRITICAL: Very small resource requests
       resources:
         limits:
-          cpu: 1000m
-          memory: 2Gi
+          cpu: 200m        # Reduced from 1000m
+          memory: 512Mi    # Reduced from 2Gi
         requests:
-          cpu: 500m
-          memory: 1Gi
+          cpu: 100m        # Reduced from 500m
+          memory: 256Mi    # Reduced from 1Gi
       
-      retention: 15d
-      retentionSize: 8GB
+      # Very short retention to save memory
+      retention: 3d      # Reduced from 15d
+      retentionSize: 1GB # Reduced from 8GB
       
       storageSpec:
         volumeClaimTemplate:
@@ -62,59 +67,61 @@ kube-prometheus-stack:
             accessModes: ["ReadWriteOnce"]
             resources:
               requests:
-                storage: 10Gi
+                storage: 2Gi  # Reduced from 10Gi
       
-      scrapeInterval: 30s
-      evaluationInterval: 30s
+      # Less frequent scraping to reduce CPU load
+      scrapeInterval: 120s  # Increased from 30s
+      evaluationInterval: 120s
+      
       serviceMonitorSelectorNilUsesHelmValues: false
-
-  # AlertManager with persistence
-  alertmanager:
-    enabled: true
-    
-    alertmanagerSpec:
-      resources:
-        limits:
-          cpu: 200m
-          memory: 256Mi
-        requests:
-          cpu: 100m
-          memory: 128Mi
-          
-      storage:
-        volumeClaimTemplate:
-          spec:
-            storageClassName: local-storage
-            accessModes: ["ReadWriteOnce"]
-            resources:
-              requests:
-                storage: 1Gi
       
-      retention: 168h
+      # MINIMAL scraping - only essential metrics
+      additionalScrapeConfigs:
+        - job_name: 'kubernetes-nodes-minimal'
+          scrape_interval: 120s
+          kubernetes_sd_configs:
+            - role: node
+          relabel_configs:
+            - source_labels: [__address__]
+              regex: '(.*):10250'
+              replacement: '${1}:9100'
+              target_label: __address__
 
-  # Exporters
+  # Disable AlertManager to save resources
+  alertmanager:
+    enabled: false
+
+  # Prometheus Operator - minimal
+  prometheusOperator:
+    resources:
+      limits:
+        cpu: 100m
+        memory: 128Mi
+      requests:
+        cpu: 50m
+        memory: 64Mi
+
+  # Node Exporter - ultra minimal
   nodeExporter:
     enabled: true
     resources:
       limits:
-        cpu: 200m
-        memory: 128Mi
+        cpu: 50m
+        memory: 32Mi
+      requests:
+        cpu: 25m
+        memory: 16Mi
 
+  # Disable kube-state-metrics to save resources
   kubeStateMetrics:
-    enabled: true
-    resources:
-      limits:
-        cpu: 200m
-        memory: 256Mi
+    enabled: false
 
-  # Alerting rules
+  # Disable most rules to save memory
   defaultRules:
-    create: true
-    rules:
-      alertmanager: true
-      general: true
-      k8s: true
-      kubernetesApps: true
-      kubernetesResources: true
-      node: true
-      prometheus: true
+    create: false
+    
+# Allow scheduling on master node if needed
+tolerations:
+  - key: "node-role.kubernetes.io/control-plane"
+    operator: "Exists"
+    effect: "NoSchedule"

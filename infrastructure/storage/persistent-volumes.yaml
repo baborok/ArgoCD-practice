@@ -1,11 +1,13 @@
-# PV для Prometheus (10Gi)
+# Minimal PVs for ultra lightweight setup
+
+# PV для Prometheus (2Gi instead of 10Gi)
 apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: monitoring-pv-10gi
+  name: monitoring-pv-2gi-prometheus
 spec:
   capacity:
-    storage: 10Gi
+    storage: 2Gi
   accessModes:
     - ReadWriteOnce
   persistentVolumeReclaimPolicy: Delete
@@ -15,28 +17,11 @@ spec:
     type: DirectoryOrCreate
 
 ---
-# PV для Grafana (2Gi)
+# PV для Grafana (1Gi)
 apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: monitoring-pv-2gi
-spec:
-  capacity:
-    storage: 2Gi
-  accessModes:
-    - ReadWriteOnce
-  persistentVolumeReclaimPolicy: Delete
-  storageClassName: local-storage
-  hostPath:
-    path: /var/local-storage/monitoring/grafana
-    type: DirectoryOrCreate
-
----
-# PV для AlertManager (1Gi)
-apiVersion: v1
-kind: PersistentVolume
-metadata:
-  name: monitoring-pv-1gi
+  name: monitoring-pv-1gi-grafana
 spec:
   capacity:
     storage: 1Gi
@@ -45,5 +30,5 @@ spec:
   persistentVolumeReclaimPolicy: Delete
   storageClassName: local-storage
   hostPath:
-    path: /var/local-storage/monitoring/alertmanager
+    path: /var/local-storage/monitoring/grafana
     type: DirectoryOrCreate
