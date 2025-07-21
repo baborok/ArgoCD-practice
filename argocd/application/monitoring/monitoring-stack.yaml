@@ -26,21 +26,6 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
-      - ServerSideApply=true  # Important for CRDs
+      - ServerSideApply=true
     retry:
       limit: 5
-      backoff:
-        duration: 5s
-        factor: 2
-        maxDuration: 3m
-
-  # Ignore differences in these fields (common for Prometheus)
-  ignoreDifferences:
-  - group: apps
-    kind: Deployment
-    jsonPointers:
-    - /spec/replicas
-  - group: ""
-    kind: Service
-    jsonPointers:
-    - /spec/clusterIP
