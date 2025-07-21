@@ -1,0 +1,93 @@
+# Centralized monitoring for ALL environments
+# This single monitoring stack monitors: dev, staging, prod, argocd, kube-system
+
+# Enable ingress
+ingress:
+  enabled: true
+  grafana:
+    path: /grafana
+  prometheus:
+    path: /prometheus  
+  alertmanager:
+    path: /alertmanager
+
+# Override default values for our setup
+kube-prometheus-stack:
+  # Grafana configuration
+  grafana:
+    adminPassword: "monitoring-admin123"
+    
+    # Additional datasources (if needed later)
+    additionalDataSources:
+      - name: Loki
+        type: loki
+        url: http://loki:3100
+        isDefault: false
+        
+    # Custom dashboard ConfigMaps (will add later)
+    dashboards:
+      default:
+        microservices-overview:
+          url: https://raw.githubusercontent.com/prometheus-community/helm-charts/main/charts/kube-prometheus-stack/templates/grafana/dashboards-1.14/k8s-resources-cluster.json
+          
+  # Prometheus specific configuration
+  prometheus:
+    prometheusSpec:
+      # Storage for our cluster size
+      storageSpec:
+        volumeClaimTemplate:
+          spec:
+            resources:
+              requests:
+                storage: 15Gi
+      
+      # Custom alerting rules for our microservices
+      additionalPrometheusRulesMap:
+        microservices.rules:
+          groups:
+          - name: microservices
+            rules:
+            - alert: MicroserviceDown
+              expr: up{job="microservices-all-envs"} == 0
+              for: 2m
+              labels:
+                severity: critical
+              annotations:
+                summary: "Microservice {{ $labels.container }} is down"
+                description: "{{ $labels.container }} in {{ $labels.environment }} has been down for more than 2 minutes."
+                
+            - alert: HighMemoryUsage
+              expr: container_memory_usage_bytes{namespace=~"dev|staging|prod"} / container_spec_memory_limit_bytes > 0.9
+              for: 5m
+              labels:
+                severity: warning
+              annotations:
+                summary: "High memory usage in {{ $labels.container }}"
+                description: "{{ $labels.container }} in {{ $labels.namespace }} is using {{ $value | humanizePercentage }} of available memory."
+
+  # AlertManager configuration
+  alertmanager:
+    config:
+      global:
+        smtp_smarthost: 'localhost:587'
+        smtp_from: 'alertmanager@yourdomain.com'
+        
+      route:
+        group_by: ['alertname', 'environment']
+        group_wait: 10s
+        group_interval: 10s
+        repeat_interval: 1h
+        receiver: 'web.hook'
+        
+      receivers:
+      - name: 'web.hook'
+        webhook_configs:
+        - url: 'http://127.0.0.1:5001/'  # Configure your webhook URL
+          
+# Resource requests/limits for our cluster
+resources:
+  limits:
+    memory: "1Gi"
+  requests:
+    cpu: "200m"
+    memory: "1Gi"
